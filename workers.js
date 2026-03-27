@@ -1,5 +1,5 @@
 // workers.js
-// ZAKOXUN 云盘 - 修复 env 传递问题
+// ZAKOXUN 云盘 - 绑定名称为 oss（小写）
 
 export default {
   async fetch(request, env) {
@@ -44,15 +44,15 @@ export default {
 // 获取文件列表
 async function listFiles(env) {
   try {
-    // 检查 env.OSS 是否存在
-    if (!env.OSS) {
-      return new Response(JSON.stringify({ error: 'R2 存储桶未绑定' }), {
+    // 检查绑定是否存在（小写 oss）
+    if (!env || !env.oss) {
+      return new Response(JSON.stringify({ error: 'R2存储桶未绑定，请检查 Worker 绑定设置' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
     
-    const list = await env.OSS.list();
+    const list = await env.oss.list();
     const files = list.objects.map(obj => ({
       name: obj.key,
       size: obj.size,
@@ -78,7 +78,10 @@ async function uploadFile(request, env, path) {
   }
   
   try {
-    await env.OSS.put(key, request.body);
+    if (!env || !env.oss) {
+      return new Response('R2存储桶未绑定', { status: 500 });
+    }
+    await env.oss.put(key, request.body);
     return new Response('OK', { status: 200 });
   } catch (err) {
     return new Response(err.message, { status: 500 });
@@ -92,7 +95,11 @@ async function downloadFile(request, env, path) {
     return new Response('Not Found', { status: 404 });
   }
   
-  const object = await env.OSS.get(key);
+  if (!env || !env.oss) {
+    return new Response('R2存储桶未绑定', { status: 500 });
+  }
+  
+  const object = await env.oss.get(key);
   if (!object) {
     return new Response('Not Found', { status: 404 });
   }
@@ -112,7 +119,11 @@ async function deleteFile(env, path) {
     return new Response('Invalid file name', { status: 400 });
   }
   
-  await env.OSS.delete(key);
+  if (!env || !env.oss) {
+    return new Response('R2存储桶未绑定', { status: 500 });
+  }
+  
+  await env.oss.delete(key);
   return new Response('OK', { status: 200 });
 }
 
@@ -326,12 +337,12 @@ function serveScriptJS() {
             const date = new Date(file.uploaded).toLocaleString();
             
             html += \`
-                <tr>
+                  <tr>
                     <td><span class="file-icon">\${icon}</span> <span class="file-name" onclick="downloadFile('\${encodeURIComponent(file.name)}')">\${escapeHtml(file.name)}</span></td>
                     <td class="size-col">\${size}</td>
                     <td class="date-col">\${date}</td>
                     <td><a class="download-link" onclick="downloadFile('\${encodeURIComponent(file.name)}')">下载</a> <a class="delete-link" onclick="deleteFile('\${encodeURIComponent(file.name)}')">删除</a></td>
-                </tr>
+                  </tr>
             \`;
         }
         
