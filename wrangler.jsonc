@@ -1,5 +1,5 @@
 {
-  "name": "oss-index-zakomc",
+  "name": "oss-index",
   "main": "workers.js",
   "compatibility_date": "2026-03-27"
 }
