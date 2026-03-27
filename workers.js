@@ -1,5 +1,5 @@
 // workers.js
-// ZAKOXUN 云盘 - 基于 R2 + Worker
+// ZAKOXUN 云盘 - 绑定 R2 存储桶后使用
 
 export default {
   async fetch(request, env) {
@@ -17,7 +17,7 @@ export default {
       return serveScriptJS();
     }
 
-    // API 路由
+    // API 路由 - 获取文件列表
     if (path === '/api/list') {
       return listFiles(env);
     }
@@ -41,50 +41,36 @@ export default {
   }
 };
 
-// 首页 HTML
-function serveIndexPage() {
-  return new Response(indexHtml, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' }
-  });
-}
-
-// CSS
-function serveStyleCSS() {
-  return new Response(styleCss, {
-    headers: { 'Content-Type': 'text/css; charset=utf-8' }
-  });
-}
-
-// JS
-function serveScriptJS() {
-  return new Response(scriptJs, {
-    headers: { 'Content-Type': 'application/javascript; charset=utf-8' }
-  });
-}
-
 // 获取文件列表
 async function listFiles(env) {
-  const list = await env.MY_BUCKET.list();
-  const files = list.objects.map(obj => ({
-    name: obj.key,
-    size: obj.size,
-    uploaded: obj.uploaded
-  }));
-  
-  return new Response(JSON.stringify({ files }), {
-    headers: { 'Content-Type': 'application/json' }
-  });
+  try {
+    const list = await env.OSS.list();
+    const files = list.objects.map(obj => ({
+      name: obj.key,
+      size: obj.size,
+      uploaded: obj.uploaded
+    }));
+    
+    return new Response(JSON.stringify({ files }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
 }
 
 // 上传文件
 async function uploadFile(request, env, path) {
-  const key = path.slice(1); // 去掉开头的 /
+  const key = path.slice(1);
   if (!key) {
     return new Response('Invalid file name', { status: 400 });
   }
   
   try {
-    await env.MY_BUCKET.put(key, request.body);
+    await env.OSS.put(key, request.body);
     return new Response('OK', { status: 200 });
   } catch (err) {
     return new Response(err.message, { status: 500 });
@@ -98,7 +84,7 @@ async function downloadFile(request, env, path) {
     return new Response('Not Found', { status: 404 });
   }
   
-  const object = await env.MY_BUCKET.get(key);
+  const object = await env.OSS.get(key);
   if (!object) {
     return new Response('Not Found', { status: 404 });
   }
@@ -118,12 +104,13 @@ async function deleteFile(env, path) {
     return new Response('Invalid file name', { status: 400 });
   }
   
-  await env.MY_BUCKET.delete(key);
+  await env.OSS.delete(key);
   return new Response('OK', { status: 200 });
 }
 
 // ==================== HTML ====================
-const indexHtml = `<!DOCTYPE html>
+function serveIndexPage() {
+  const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -156,9 +143,15 @@ const indexHtml = `<!DOCTYPE html>
     <script src="/script.js"></script>
 </body>
 </html>`;
+  
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
 
 // ==================== CSS ====================
-const styleCss = `* {
+function serveStyleCSS() {
+  const css = `* {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -245,21 +238,17 @@ body {
 .download-link {
     color: #28a745;
     cursor: pointer;
+    margin-right: 10px;
 }
 .delete-link {
     color: #dc3545;
     cursor: pointer;
-    margin-left: 10px;
 }
-.size-col {
+.size-col, .date-col {
     color: #6c757d;
     font-size: 12px;
 }
-.date-col {
-    color: #6c757d;
-    font-size: 12px;
-}
-.empty-row td {
+.empty-row {
     text-align: center;
     padding: 50px;
     color: #6c757d;
@@ -295,9 +284,15 @@ input[type="file"] {
         display: none;
     }
 }`;
+  
+  return new Response(css, {
+    headers: { 'Content-Type': 'text/css; charset=utf-8' }
+  });
+}
 
 // ==================== JavaScript ====================
-const scriptJs = `async function loadFiles() {
+function serveScriptJS() {
+  const js = `async function loadFiles() {
     const container = document.getElementById('fileListContainer');
     container.innerHTML = '<div class="loading">加载中...</div>';
     
@@ -305,12 +300,17 @@ const scriptJs = `async function loadFiles() {
         const res = await fetch('/api/list');
         const data = await res.json();
         
+        if (data.error) {
+            container.innerHTML = '<div class="empty-row">⚠️ ' + data.error + '</div>';
+            return;
+        }
+        
         if (data.files.length === 0) {
             container.innerHTML = '<div class="empty-row">📁 暂无文件，点击上传按钮添加文件</div>';
             return;
         }
         
-        let html = '<table class="file-table"><thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead><tbody>';
+        let html = '<table class="file-table"><thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></thead><tbody>';
         
         for (const file of data.files) {
             const icon = getFileIcon(file.name);
@@ -335,10 +335,13 @@ const scriptJs = `async function loadFiles() {
 function getFileIcon(filename) {
     const ext = filename.split('.').pop().toLowerCase();
     const icons = {
-        'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️',
-        'mp4': '🎬', 'mp3': '🎵', 'zip': '🗜️', 'rar': '🗜️',
-        'pdf': '📄', 'doc': '📝', 'docx': '📝', 'exe': '⚙️', 'apk': '📱',
-        'txt': '📃', 'md': '📃'
+        'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
+        'mp4': '🎬', 'mov': '🎬', 'avi': '🎬', 'mkv': '🎬',
+        'mp3': '🎵', 'wav': '🎵', 'flac': '🎵',
+        'zip': '🗜️', 'rar': '🗜️', '7z': '🗜️', 'tar': '🗜️',
+        'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊',
+        'exe': '⚙️', 'msi': '⚙️', 'apk': '📱',
+        'txt': '📃', 'md': '📃', 'json': '🔧'
     };
     return icons[ext] || '📎';
 }
@@ -391,3 +394,8 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
 });
 
 loadFiles();`;
+  
+  return new Response(js, {
+    headers: { 'Content-Type': 'application/javascript; charset=utf-8' }
+  });
+}
