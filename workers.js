@@ -1,5 +1,5 @@
 // workers.js
-// ZAKOXUN 云盘 - 绑定 R2 存储桶后使用
+// ZAKOXUN 云盘 - 修复 env 传递问题
 
 export default {
   async fetch(request, env) {
@@ -44,6 +44,14 @@ export default {
 // 获取文件列表
 async function listFiles(env) {
   try {
+    // 检查 env.OSS 是否存在
+    if (!env.OSS) {
+      return new Response(JSON.stringify({ error: 'R2 存储桶未绑定' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
     const list = await env.OSS.list();
     const files = list.objects.map(obj => ({
       name: obj.key,
@@ -305,29 +313,32 @@ function serveScriptJS() {
             return;
         }
         
-        if (data.files.length === 0) {
+        if (!data.files || data.files.length === 0) {
             container.innerHTML = '<div class="empty-row">📁 暂无文件，点击上传按钮添加文件</div>';
             return;
         }
         
-        let html = '<table class="file-table"><thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></thead><tbody>';
+        let html = '<table class="file-table"><thead> <th>名称</th><th>大小</th><th>修改时间</th><th>操作</th> </thead><tbody>';
         
         for (const file of data.files) {
             const icon = getFileIcon(file.name);
             const size = formatSize(file.size);
             const date = new Date(file.uploaded).toLocaleString();
             
-            html += \`<tr>
-                <td><span class="file-icon">\${icon}</span> <span class="file-name" onclick="downloadFile('\${encodeURIComponent(file.name)}')">\${escapeHtml(file.name)}</span></td>
-                <td class="size-col">\${size}</td>
-                <td class="date-col">\${date}</td>
-                <td><a class="download-link" onclick="downloadFile('\${encodeURIComponent(file.name)}')">下载</a> <a class="delete-link" onclick="deleteFile('\${encodeURIComponent(file.name)}')">删除</a></td>
-            </tr>\`;
+            html += \`
+                <tr>
+                    <td><span class="file-icon">\${icon}</span> <span class="file-name" onclick="downloadFile('\${encodeURIComponent(file.name)}')">\${escapeHtml(file.name)}</span></td>
+                    <td class="size-col">\${size}</td>
+                    <td class="date-col">\${date}</td>
+                    <td><a class="download-link" onclick="downloadFile('\${encodeURIComponent(file.name)}')">下载</a> <a class="delete-link" onclick="deleteFile('\${encodeURIComponent(file.name)}')">删除</a></td>
+                </tr>
+            \`;
         }
         
         html += '</tbody></table>';
         container.innerHTML = html;
     } catch (err) {
+        console.error(err);
         container.innerHTML = '<div class="empty-row">⚠️ 加载失败，请刷新重试</div>';
     }
 }
